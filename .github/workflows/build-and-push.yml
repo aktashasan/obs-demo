@@ -15,41 +15,88 @@ on:
 env:
   JAVA_VERSION: '21'
   MAVEN_OPTS: -Xmx1024m
+  IMAGE_NAME: obs-demo
 
 jobs:
-  build-and-push:
+  # ============================================================================
+  # JOB 1: Maven Build & Test
+  # ============================================================================
+  maven-build:
+    name: Maven Build and Test
     runs-on: ubuntu-latest
     
     steps:
-      # Checkout kodu
-      - name: Checkout code
+      - name: 📥 Checkout code
         uses: actions/checkout@v4
 
-      # Java 21 kurulumu
-      - name: Set up JDK 21
+      - name: ☕ Set up JDK 21
         uses: actions/setup-java@v4
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
           cache: 'maven'
 
-      # Maven build
-      - name: Build with Maven
+      - name: 🔨 Build with Maven
         run: |
-          mvn clean package -DskipTests
-          echo "✅ Maven build completed"
+          echo "🔨 Starting Maven build..."
+          mvn clean package -DskipTests -B
+          echo "✅ Maven build completed successfully"
 
-      # Test çalıştır (varsa)
-      - name: Run tests
-        run: mvn test
+      - name: 🧪 Run tests
+        run: |
+          echo "🧪 Running tests..."
+          mvn test -B
         continue-on-error: true
 
-      # Docker meta - tag ve label bilgileri oluştur
-      - name: Docker meta
+      - name: 📊 Test Report
+        if: always()
+        run: |
+          echo "## 🧪 Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f target/surefire-reports/*.xml ]; then
+            echo "✅ Tests completed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "ℹ️ No tests found" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: 📦 Upload Maven artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: maven-artifacts
+          path: |
+            target/*.jar
+            target/*.jar.original
+            pom.xml
+          retention-days: 1
+
+      - name: ✅ Maven Build Summary
+        run: |
+          echo "## ✅ Maven Build Successful" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Java Version: ${{ env.JAVA_VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Build Tool: Maven" >> $GITHUB_STEP_SUMMARY
+          echo "- Artifact: $(ls target/*.jar | grep -v original)" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # JOB 2: Docker Build
+  # ============================================================================
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: maven-build
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🏷️ Docker meta (generate tags)
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/obs-demo
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -58,52 +105,138 @@ jobs:
             type=semver,pattern={{major}}
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix={{branch}}-
+          labels: |
+            org.opencontainers.image.title=obs-demo
+            org.opencontainers.image.description=Spring Boot Observability Demo Service
+            org.opencontainers.image.vendor=Your Company
 
-      # DockerHub'a login
-      - name: Login to DockerHub
+      - name: 🔨 Build Docker image (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+          outputs: type=docker,dest=/tmp/obs-demo-image.tar
+          build-args: |
+            BUILD_DATE=${{ steps.meta.outputs.created }}
+            VERSION=${{ steps.meta.outputs.version }}
+
+      - name: 📦 Upload Docker image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp/obs-demo-image.tar
+          retention-days: 1
+
+      - name: 📊 Docker Build Summary
+        run: |
+          echo "## 🐳 Docker Build Successful" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tags:**" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # JOB 3: Docker Push to DockerHub
+  # ============================================================================
+  docker-push:
+    name: Push to DockerHub
+    runs-on: ubuntu-latest
+    needs: docker-build
+    # Push sadece main/develop branch'lerine veya tag'lere yapılır
+    if: github.event_name != 'pull_request'
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔐 Login to DockerHub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Docker Buildx kurulumu (multi-platform build için)
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # Docker image build ve push
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+      - name: 🏷️ Docker meta (generate tags)
+        id: meta
+        uses: docker/metadata-action@v5
         with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/obs-demo:buildcache
-          cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/obs-demo:buildcache,mode=max
-          build-args: |
-            BUILD_DATE=${{ steps.meta.outputs.created }}
-            VERSION=${{ steps.meta.outputs.version }}
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix={{branch}}-
+          labels: |
+            org.opencontainers.image.title=obs-demo
+            org.opencontainers.image.description=Spring Boot Observability Demo Service
+            org.opencontainers.image.vendor=Your Company
 
-      # Build summary
-      - name: Build Summary
+      - name: 📥 Download Docker image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp
+
+      - name: 🔄 Load Docker image
         run: |
-          echo "## 🚀 Build Summary" >> $GITHUB_STEP_SUMMARY
+          docker load --input /tmp/obs-demo-image.tar
+          echo "✅ Docker image loaded from artifact"
+
+      - name: 🏷️ Tag and Push Docker image
+        run: |
+          echo "📤 Pushing image to DockerHub..."
+          
+          # Her tag için push yap
+          while IFS= read -r tag; do
+            echo "Pushing: $tag"
+            docker tag $(docker images -q | head -1) "$tag"
+            docker push "$tag"
+          done <<< "${{ steps.meta.outputs.tags }}"
+          
+          echo "✅ All tags pushed successfully"
+
+      - name: 🧹 Verify pushed images
+        run: |
+          echo "🔍 Verifying pushed images..."
+          echo "Image: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}"
+          echo "Tags: ${{ steps.meta.outputs.tags }}"
+
+      - name: 📊 Push Summary
+        run: |
+          echo "## 🚀 Push to DockerHub Successful" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **Build Status:** Success" >> $GITHUB_STEP_SUMMARY
-          echo "📦 **Image:** ${{ secrets.DOCKERHUB_USERNAME }}/obs-demo" >> $GITHUB_STEP_SUMMARY
-          echo "🏷️ **Tags:**" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Status:** Successfully pushed to DockerHub" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📦 **Repository:** https://hub.docker.com/r/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🏷️ **Pushed Tags:**" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "🔗 **DockerHub:** https://hub.docker.com/r/${{ secrets.DOCKERHUB_USERNAME }}/obs-demo" >> $GITHUB_STEP_SUMMARY
+          echo "**Pull command:**" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
-      # Slack/Discord bildirim (opsiyonel)
-      - name: Notify on success
+      - name: ✅ Notify success
         if: success()
         run: |
-          echo "✅ Build and push completed successfully!"
-          echo "Image: ${{ secrets.DOCKERHUB_USERNAME }}/obs-demo"
-          echo "Tags: ${{ steps.meta.outputs.tags }}"
+          echo "✅ Pipeline completed successfully!"
+          echo "📦 Image: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}"
+          echo "🏷️ Tags: ${{ steps.meta.outputs.tags }}"
+          echo "🔗 DockerHub: https://hub.docker.com/r/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}"
 
