@@ -107,8 +107,12 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # NO CACHE - to avoid DockerHub authentication issues
+          # cache-from: type=gha
+          # cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VERSION=${{ github.sha }}
 
       - name: 📊 Summary
         if: github.event_name != 'pull_request'
