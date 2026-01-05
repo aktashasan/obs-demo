@@ -12,6 +12,8 @@ IMAGE_TAG := latest
 CONTAINER_NAME := obs-demo
 PORT := 8080
 DOCKERHUB_USER := $(shell echo $$DOCKERHUB_USERNAME)
+GITHUB_USER := $(shell echo $$GITHUB_USERNAME)
+GHCR_REGISTRY := ghcr.io
 
 ##@ General
 
@@ -167,6 +169,53 @@ pull: ## Pull image from DockerHub
 	@echo "📥 Pulling from DockerHub..."
 	docker pull $(DOCKERHUB_USER)/$(IMAGE_NAME):$(IMAGE_TAG)
 	@echo "✅ Pulled: $(DOCKERHUB_USER)/$(IMAGE_NAME):$(IMAGE_TAG)"
+
+##@ GitHub Container Registry Operations
+
+ghcr-login: ## Login to GitHub Container Registry
+	@if [ -z "$(GITHUB_USER)" ]; then \
+		echo "❌ GITHUB_USERNAME not set"; \
+		exit 1; \
+	fi
+	@echo "🔐 Logging in to GitHub Container Registry..."
+	@echo "Enter your GitHub Personal Access Token (with write:packages scope):"
+	@docker login $(GHCR_REGISTRY) -u $(GITHUB_USER)
+	@echo "✅ Logged in to GHCR"
+
+ghcr-tag: ## Tag image for GitHub Container Registry
+	@if [ -z "$(GITHUB_USER)" ]; then \
+		echo "❌ GITHUB_USERNAME not set"; \
+		exit 1; \
+	fi
+	docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(GHCR_REGISTRY)/$(GITHUB_USER)/$(IMAGE_NAME):$(IMAGE_TAG)
+	@echo "✅ Tagged: $(GHCR_REGISTRY)/$(GITHUB_USER)/$(IMAGE_NAME):$(IMAGE_TAG)"
+
+ghcr-push: ghcr-tag ## Push image to GitHub Container Registry
+	@if [ -z "$(GITHUB_USER)" ]; then \
+		echo "❌ GITHUB_USERNAME not set"; \
+		exit 1; \
+	fi
+	@echo "📤 Pushing to GitHub Container Registry..."
+	docker push $(GHCR_REGISTRY)/$(GITHUB_USER)/$(IMAGE_NAME):$(IMAGE_TAG)
+	@echo "✅ Pushed: $(GHCR_REGISTRY)/$(GITHUB_USER)/$(IMAGE_NAME):$(IMAGE_TAG)"
+	@echo "🔗 View at: https://github.com/$(GITHUB_USER)?tab=packages"
+
+ghcr-pull: ## Pull image from GitHub Container Registry
+	@if [ -z "$(GITHUB_USER)" ]; then \
+		echo "❌ GITHUB_USERNAME not set"; \
+		exit 1; \
+	fi
+	@echo "📥 Pulling from GitHub Container Registry..."
+	docker pull $(GHCR_REGISTRY)/$(GITHUB_USER)/$(IMAGE_NAME):$(IMAGE_TAG)
+	@echo "✅ Pulled: $(GHCR_REGISTRY)/$(GITHUB_USER)/$(IMAGE_NAME):$(IMAGE_TAG)"
+
+##@ Multi-Registry Operations
+
+push-all: tag ghcr-tag ## Push to both DockerHub and GHCR
+	@echo "📤 Pushing to all registries..."
+	@$(MAKE) push
+	@$(MAKE) ghcr-push
+	@echo "✅ Pushed to all registries"
 
 ##@ Analysis & Cleanup
 
