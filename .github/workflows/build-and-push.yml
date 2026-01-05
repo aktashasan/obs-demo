@@ -212,15 +212,30 @@ jobs:
           docker load --input /tmp/obs-demo-image.tar
           echo "✅ Docker image loaded from artifact"
 
-      - name: 🏷️ Tag and Push Docker image
+      - name: 🏷️ Re-tag and Push Docker image
         run: |
           echo "📤 Pushing image to DockerHub..."
           
+          # Load edilen image'ın ID'sini al
+          IMAGE_ID=$(docker images -q | head -1)
+          echo "Image ID: $IMAGE_ID"
+          
+          # Önce DockerHub'a tekrar login ol (cache problemi için)
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+          
           # Her tag için push yap
           while IFS= read -r tag; do
-            echo "Pushing: $tag"
-            docker tag $(docker images -q | head -1) "$tag"
-            docker push "$tag"
+            if [ -n "$tag" ]; then
+              echo "Tagging: $IMAGE_ID -> $tag"
+              docker tag "$IMAGE_ID" "$tag"
+              echo "Pushing: $tag"
+              docker push "$tag" || {
+                echo "⚠️ Failed to push $tag, retrying..."
+                sleep 5
+                docker push "$tag"
+              }
+              echo "✅ Pushed: $tag"
+            fi
           done <<< "${{ steps.meta.outputs.tags }}"
           
           echo "✅ All tags pushed successfully"
