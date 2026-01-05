@@ -1,0 +1,41 @@
+# Git
+.git
+.gitignore
+.github
+
+# Maven
+target/
+!target/*.jar
+.mvn/
+
+# IDE
+.idea/
+.vscode/
+.settings/
+.classpath
+.project
+*.iml
+
+# Documentation
+README.md
+QUICKSTART.md
+TESTING-RESULTS.md
+*.md
+
+# Scripts
+setup-maven.sh
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary
+*.tmp
+*.bak
+*.swp
+*~
+
