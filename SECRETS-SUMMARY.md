@@ -23,9 +23,14 @@ Format: dckr_pat_xxxxxxxxxxxxxxxxxxxxx
 1. https://hub.docker.com → Login
 2. **Account Settings** → **Security** → **Access Tokens**
 3. **New Access Token** 
-4. Name: `github-actions`
-5. Permissions: **Read, Write, Delete**
+4. Name: `github-actions` veya `github-actions-obs-demo`
+5. Permissions: ⚠️ **Mutlaka "Read, Write, Delete" seçin!**
+   - ✅ "Read, Write, Delete" ← DOĞRU
+   - ❌ "Read-only" ← YANLIŞ (hata verir!)
+   - ❌ "Read, Write" ← YANLIŞ (Delete eksik!)
 6. **Generate** → Token'ı kopyala (bir kez gösterilir!)
+
+⚠️ **Önemli:** Yanlış yetki seçerseniz `401 Unauthorized` hatası alırsınız!
 
 ---
 

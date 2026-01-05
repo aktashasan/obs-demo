@@ -165,6 +165,7 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+        continue-on-error: false
 
       - name: 🏷️ Docker meta (generate tags)
         id: meta

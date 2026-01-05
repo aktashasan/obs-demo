@@ -39,9 +39,17 @@ https://hub.docker.com → Login
 4. **New Access Token** butonuna tıklayın
 
 ### Adım 3: Token Ayarları
-- **Description:** `github-actions` (veya istediğiniz isim)
-- **Access permissions:** **Read, Write, Delete** seçin
+
+⚠️ **ÇOK ÖNEMLİ - DİKKATLE OKUYUN:**
+
+- **Description:** `github-actions` (veya `github-actions-obs-demo`)
+- **Access permissions:** Mutlaka **"Read, Write, Delete"** seçin
+  - ✅ **"Read, Write, Delete"** ← DOĞRU (mutlaka bu olmalı!)
+  - ❌ "Read-only" ← YANLIŞ (yetki hatası verir)
+  - ❌ "Read, Write" ← YANLIŞ (Delete yetkisi eksik)
 - **Generate** butonuna tıklayın
+
+**Not:** Eğer "Read, Write, Delete" yerine başka bir şey seçerseniz, GitHub Actions'da `401 Unauthorized: access token has insufficient scopes` hatası alırsınız!
 
 ### Adım 4: Token'ı Kopyalayın
 ⚠️ **ÖNEMLİ:** Token sadece bir kez gösterilir! Hemen kopyalayın.
