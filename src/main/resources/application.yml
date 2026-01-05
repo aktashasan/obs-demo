@@ -1,0 +1,60 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: obs-demo
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Only expose health, prometheus, and info endpoints
+        include: health,prometheus,info
+      base-path: /actuator
+  
+  endpoint:
+    health:
+      # Enable Kubernetes-style probes (liveness, readiness)
+      probes:
+        enabled: true
+      show-details: always
+    
+    prometheus:
+      # Ensure Prometheus endpoint is enabled
+      enabled: true
+  
+  server:
+    # Use same port as application (not a separate management port)
+    port: 8080
+  
+  metrics:
+    distribution:
+      # Enable percentiles and histograms for Timer metrics
+      percentiles-histogram:
+        http.server.requests: true
+      # Define SLO boundaries for histogram buckets
+      slo:
+        http.server.requests: 10ms,50ms,100ms,200ms,500ms,1s,2s,5s
+    
+    tags:
+      # Add application tag to all metrics
+      application: ${spring.application.name}
+    
+    # Enable JVM metrics
+    enable:
+      jvm: true
+      process: true
+      system: true
+
+  info:
+    env:
+      enabled: true
+
+# Application info (exposed via /actuator/info)
+info:
+  app:
+    name: obs-demo
+    description: Observability Demo Service
+    version: 1.0.0
+
