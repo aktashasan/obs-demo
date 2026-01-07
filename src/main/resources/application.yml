@@ -58,3 +58,10 @@ info:
     description: Observability Demo Service
     version: 1.0.0
 
+# Observability Debug Settings
+# Enable debug endpoints for testing Grafana dashboards/alerts
+# WARNING: Keep this false in production
+obs:
+  debug:
+    enabled: false
+
