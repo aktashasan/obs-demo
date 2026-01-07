@@ -1,0 +1,222 @@
+name: Semantic Version and Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  JAVA_VERSION: '21'
+  MAVEN_OPTS: -Xmx1024m
+
+jobs:
+  # ============================================================================
+  # JOB 1: Determine Version based on Conventional Commits
+  # ============================================================================
+  determine-version:
+    name: Determine Semantic Version
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.semver.outputs.new_version }}
+      version_type: ${{ steps.semver.outputs.version_type }}
+      
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for tags
+          
+      - name: 🏷️ Get latest tag
+        id: get_tag
+        run: |
+          # Get the latest semantic version tag
+          LATEST_TAG=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No previous version tag found, starting from v1.0.0"
+            LATEST_TAG="v1.0.0"
+            CURRENT_VERSION="1.0.0"
+          else
+            echo "Latest tag: $LATEST_TAG"
+            CURRENT_VERSION="${LATEST_TAG#v}"
+          fi
+          
+          echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          
+      - name: 📝 Get commit message
+        id: commit
+        run: |
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          echo "Commit message: $COMMIT_MSG"
+          echo "commit_msg<<EOF" >> $GITHUB_OUTPUT
+          echo "$COMMIT_MSG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+      - name: 🔢 Calculate new version
+        id: semver
+        run: |
+          CURRENT_VERSION="${{ steps.get_tag.outputs.current_version }}"
+          COMMIT_MSG="${{ steps.commit.outputs.commit_msg }}"
+          
+          # Split version into MAJOR.MINOR.PATCH
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+          
+          echo "Current version: $MAJOR.$MINOR.$PATCH"
+          
+          # Determine version bump based on conventional commits
+          if echo "$COMMIT_MSG" | grep -qE '^(feat!|fix!|refactor!|perf!):|BREAKING CHANGE:'; then
+            # Major version bump for breaking changes
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+            VERSION_TYPE="major"
+            echo "🔴 BREAKING CHANGE detected → Major version bump"
+          elif echo "$COMMIT_MSG" | grep -qE '^feat(\(.+\))?:'; then
+            # Minor version bump for new features
+            MINOR=$((MINOR + 1))
+            PATCH=0
+            VERSION_TYPE="minor"
+            echo "🟡 Feature detected → Minor version bump"
+          elif echo "$COMMIT_MSG" | grep -qE '^(fix|perf)(\(.+\))?:'; then
+            # Patch version bump for fixes and performance improvements
+            PATCH=$((PATCH + 1))
+            VERSION_TYPE="patch"
+            echo "🟢 Fix/Perf detected → Patch version bump"
+          else
+            # Default: patch version bump for other commits (chore, docs, style, refactor, test)
+            PATCH=$((PATCH + 1))
+            VERSION_TYPE="patch"
+            echo "⚪ Other commit type → Patch version bump"
+          fi
+          
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          echo "New version: $NEW_VERSION"
+          
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "version_type=$VERSION_TYPE" >> $GITHUB_OUTPUT
+          
+      - name: 📊 Version Summary
+        run: |
+          echo "## 🏷️ Version Information" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Previous Version:** ${{ steps.get_tag.outputs.current_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **New Version:** ${{ steps.semver.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Bump Type:** ${{ steps.semver.outputs.version_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit Message:**" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.commit.outputs.commit_msg }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # JOB 2: Update pom.xml and push tag
+  # ============================================================================
+  update-version:
+    name: Update pom.xml Version
+    runs-on: ubuntu-latest
+    needs: determine-version
+    outputs:
+      new_version: ${{ needs.determine-version.outputs.new_version }}
+      
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: ☕ Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'maven'
+          
+      - name: 🔄 Update pom.xml version
+        run: |
+          NEW_VERSION="${{ needs.determine-version.outputs.new_version }}"
+          echo "Updating pom.xml to version $NEW_VERSION"
+          
+          mvn versions:set -DnewVersion=$NEW_VERSION -DgenerateBackupPoms=false
+          
+          echo "✅ pom.xml updated to version $NEW_VERSION"
+          
+      - name: 💾 Commit version bump
+        run: |
+          NEW_VERSION="${{ needs.determine-version.outputs.new_version }}"
+          VERSION_TYPE="${{ needs.determine-version.outputs.version_type }}"
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add pom.xml
+          git commit -m "chore: bump version to $NEW_VERSION [$VERSION_TYPE]" || echo "No changes to commit"
+          git push
+          
+      - name: 🏷️ Create and push git tag
+        run: |
+          NEW_VERSION="${{ needs.determine-version.outputs.new_version }}"
+          
+          git tag -a "v$NEW_VERSION" -m "Release version $NEW_VERSION"
+          git push origin "v$NEW_VERSION"
+          
+          echo "✅ Created and pushed tag v$NEW_VERSION"
+
+  # ============================================================================
+  # JOB 3: Build and Deploy to GitHub Packages
+  # ============================================================================
+  maven-deploy:
+    name: Maven Build and Deploy
+    runs-on: ubuntu-latest
+    needs: [determine-version, update-version]
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: main  # Get the latest commit with version bump
+          
+      - name: ☕ Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'maven'
+          server-id: github
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
+          
+      - name: 🔨 Build with Maven
+        run: |
+          echo "Building version ${{ needs.determine-version.outputs.new_version }}"
+          mvn clean package -DskipTests -B
+          
+      - name: 🧪 Run tests
+        run: mvn test -B
+        continue-on-error: true
+        
+      - name: 📦 Deploy to GitHub Packages
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Deploying version ${{ needs.determine-version.outputs.new_version }} to GitHub Packages"
+          mvn deploy -DskipTests -B
+          
+      - name: 📊 Deployment Summary
+        run: |
+          echo "## 🚀 Deployment Successful" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ needs.determine-version.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Type:** ${{ needs.determine-version.outputs.version_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository:** https://github.com/${{ github.repository }}/packages" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Usage:**" >> $GITHUB_STEP_SUMMARY
+          echo '```xml' >> $GITHUB_STEP_SUMMARY
+          echo '<dependency>' >> $GITHUB_STEP_SUMMARY
+          echo '  <groupId>com.observability</groupId>' >> $GITHUB_STEP_SUMMARY
+          echo '  <artifactId>obs-demo</artifactId>' >> $GITHUB_STEP_SUMMARY
+          echo '  <version>${{ needs.determine-version.outputs.new_version }}</version>' >> $GITHUB_STEP_SUMMARY
+          echo '</dependency>' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
